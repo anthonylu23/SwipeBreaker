@@ -17,6 +17,14 @@ final class GameEngineTests: XCTestCase {
         XCTAssertEqual(try store.loadHighScores().map(\.score), [50, 30])
     }
 
+    func testNewGameStartsLauncherAtConfiguredCenter() {
+        let state = GameEngine.newGame(seed: 42)
+
+        XCTAssertEqual(state.launcher, GameConfig.launcher)
+        XCTAssertEqual(state.launcher.x, 0.5, accuracy: 0.001)
+        XCTAssertEqual(state.launcher.y, 0.17, accuracy: 0.001)
+    }
+
     func testHighScoresSortAndTrimToTopTen() {
         let base = (0..<12).map {
             HighScoreEntry(id: UUID(), score: $0, turn: $0, date: Date(timeIntervalSince1970: Double($0)))
@@ -68,6 +76,29 @@ final class GameEngineTests: XCTestCase {
         XCTAssertEqual(GameEngine.launchStrength(forPullDistance: 0.11), 0.5, accuracy: 0.001)
     }
 
+    func testValidAimVectorRejectsPullsOutsideBounceArea() {
+        XCTAssertNil(GameEngine.validAimVector(fromPull: Vec2(x: 0, y: -1)))
+        XCTAssertNil(GameEngine.validAimVector(fromPull: Vec2(x: 1, y: 0.1)))
+        XCTAssertNil(GameEngine.validAimVector(fromPull: Vec2(x: 1, y: 0.05)))
+
+        let valid = GameEngine.validAimVector(fromPull: Vec2(x: 0.05, y: 0.5))
+        XCTAssertNotNil(valid)
+        XCTAssertGreaterThan(valid?.y ?? 0, 0)
+    }
+
+    func testValidAimVectorAcceptsBottomPlayableCorners() {
+        let launcher = GameConfig.launcher
+        let minX = GameConfig.leftWall + GameConfig.ballRadius
+        let maxX = GameConfig.rightWall - GameConfig.ballRadius
+        let bottomY = GameConfig.boardBottom
+
+        let leftCornerPull = Vec2(x: minX - launcher.x, y: bottomY - launcher.y)
+        let rightCornerPull = Vec2(x: maxX - launcher.x, y: bottomY - launcher.y)
+
+        XCTAssertNotNil(GameEngine.validAimVector(fromPull: leftCornerPull))
+        XCTAssertNotNil(GameEngine.validAimVector(fromPull: rightCornerPull))
+    }
+
     func testFullStrengthLaunchUsesIncreasedMaximumSpeed() {
         var state = GameEngine.newGame(seed: 1)
         state.bricks = []
@@ -78,10 +109,41 @@ final class GameEngineTests: XCTestCase {
         XCTAssertEqual(state.balls.first?.velocity.length ?? 0, 1.485, accuracy: 0.001)
     }
 
-    func testSeededRowsCanSpawnExtraBallPickups() {
+    func testDirectionBasedLaunchPreservesExactDirectionRatio() {
+        var state = GameEngine.newGame(seed: 1)
+        state.bricks = []
+        state.pickups = []
+
+        GameEngine.beginLaunch(state: &state, direction: Vec2(x: 0.3, y: 0.4), pullDistance: 1)
+
+        let velocity = state.balls.first?.velocity ?? .zero
+        XCTAssertEqual(velocity.x / velocity.y, 0.75, accuracy: 0.001)
+        XCTAssertEqual(velocity.length, 1.485, accuracy: 0.001)
+    }
+
+    func testPullBasedLaunchStillClampsShallowPulls() {
+        var state = GameEngine.newGame(seed: 1)
+        state.bricks = []
+        state.pickups = []
+
+        GameEngine.beginLaunch(state: &state, pull: Vec2(x: 1, y: 0), pullDistance: 1)
+
+        let velocity = state.balls.first?.velocity ?? .zero
+        XCTAssertGreaterThanOrEqual(velocity.normalized().y, 0.23)
+    }
+
+    func testSeededRowsAlwaysSpawnExtraBallPickups() {
         let states = (1...100).map { GameEngine.newGame(seed: UInt64($0)) }
 
-        XCTAssertTrue(states.contains { !$0.pickups.isEmpty })
+        XCTAssertTrue(states.allSatisfy { !$0.pickups.isEmpty })
+    }
+
+    func testSeededRowsSpawnFewerBricks() {
+        let states = (1...100).map { GameEngine.newGame(seed: UInt64($0)) }
+        let brickCounts = states.map(\.bricks.count)
+
+        XCTAssertEqual(brickCounts.min(), 2)
+        XCTAssertEqual(brickCounts.max(), 4)
     }
 
     func testExtraBallPickupsSpawnOnlyInUnoccupiedColumns() {

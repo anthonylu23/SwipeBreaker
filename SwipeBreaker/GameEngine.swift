@@ -9,12 +9,11 @@ struct GameConfig {
     static let topWall = 0.82
     static let boardTop = 0.80
     static let boardBottom = 0.22
-    static let launcher = Vec2(x: 0.5, y: 0.115)
+    static let launcher = Vec2(x: 0.5, y: 0.17)
     static let ballRadius = 0.012
     static let minLaunchSpeed = 0.72
     static let maxLaunchSpeed = 1.485
     static let launchStagger = 0.045
-    static let extraBallSpawnChance = 0.60
 
     static var cellWidth: Double {
         (rightWall - leftWall) / Double(columns)
@@ -89,14 +88,35 @@ struct GameEngine {
         return direction
     }
 
+    static func validAimVector(fromPull pull: Vec2, launcher: Vec2 = GameConfig.launcher) -> Vec2? {
+        let direction = pull.normalized()
+        guard direction != .zero, direction.y > 0 else { return nil }
+
+        if launcher.y < GameConfig.boardBottom {
+            let distanceToBounceArea = GameConfig.boardBottom - launcher.y
+            let xAtBounceArea = launcher.x + direction.x * (distanceToBounceArea / direction.y)
+            let minX = GameConfig.leftWall + GameConfig.ballRadius
+            let maxX = GameConfig.rightWall - GameConfig.ballRadius
+            guard xAtBounceArea >= minX, xAtBounceArea <= maxX else { return nil }
+        }
+
+        return direction
+    }
+
     static func launchStrength(forPullDistance distance: Double) -> Double {
         min(1, max(0, distance / 0.22))
     }
 
     static func beginLaunch(state: inout GameState, pull: Vec2, pullDistance: Double) {
+        beginLaunch(state: &state, direction: normalizedLaunchVector(fromPull: pull), pullDistance: pullDistance)
+    }
+
+    static func beginLaunch(state: inout GameState, direction: Vec2, pullDistance: Double) {
         guard !state.isGameOver, state.balls.isEmpty else { return }
 
-        let direction = normalizedLaunchVector(fromPull: pull)
+        let direction = direction.normalized()
+        guard direction != .zero else { return }
+
         let strength = launchStrength(forPullDistance: pullDistance)
         let speed = GameConfig.minLaunchSpeed + (GameConfig.maxLaunchSpeed - GameConfig.minLaunchSpeed) * strength
         let velocity = direction * speed
@@ -301,7 +321,7 @@ struct GameEngine {
 
     private static func spawnNewRow(in state: inout GameState) {
         var nextRandom = SeededRandom(seed: state.rngSeed)
-        let occupiedCount = 3 + Int(nextRandom.next() % 3)
+        let occupiedCount = 2 + Int(nextRandom.next() % 3)
         var columns = Array(0..<GameConfig.columns)
         columns.shuffle(using: &nextRandom)
 
@@ -311,8 +331,7 @@ struct GameEngine {
             state.bricks.append(Brick(column: column, row: 0, hitPoints: hp, maxHitPoints: hp))
         }
 
-        let pickupRoll = Double(nextRandom.next() % 10_000) / 10_000
-        if pickupRoll < GameConfig.extraBallSpawnChance, let pickupColumn = columns.dropFirst(occupiedCount).first {
+        if let pickupColumn = columns.dropFirst(occupiedCount).first {
             state.pickups.append(ExtraBallPickup(column: pickupColumn, row: 0))
         }
 

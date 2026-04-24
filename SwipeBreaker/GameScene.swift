@@ -1,15 +1,63 @@
 import SpriteKit
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
+@MainActor
 private enum Palette {
-    static let bgTop = SKColor(red: 0.06, green: 0.07, blue: 0.13, alpha: 1)
-    static let bgBottom = SKColor(red: 0.012, green: 0.012, blue: 0.022, alpha: 1)
-    static let accent = SKColor(red: 0.55, green: 0.85, blue: 1.0, alpha: 1)
-    static let danger = SKColor(red: 0.95, green: 0.32, blue: 0.32, alpha: 1)
-    static let launcher = SKColor(red: 0.72, green: 0.92, blue: 1.0, alpha: 1)
-    static let pickup = SKColor(red: 1.0, green: 0.88, blue: 0.45, alpha: 1)
-    static let hudPrimary = SKColor(white: 1.0, alpha: 0.95)
-    static let hudSecondary = SKColor(white: 1.0, alpha: 0.55)
+    static var usesLight: Bool = false
+
+    private static var mode: Theme.Mode { usesLight ? .light : .dark }
+    private static var theme: Theme.Palette { Theme.palette(for: mode) }
+
+    static var background: SKColor { theme.background.sk }
+    static var accent: SKColor     { theme.accent.sk }
+    static var launcher: SKColor   { theme.launcher.sk }
+    static var pickup: SKColor     { theme.pickup.sk }
+    static var danger: SKColor     { theme.destructive.sk }
+    static var textPrimary: SKColor   { theme.textPrimary.sk }
+    static var textSecondary: SKColor { theme.textSecondary.sk }
+    static var border: SKColor     { theme.border.sk }
+}
+
+@MainActor
+private final class LaunchFeedback {
+#if canImport(UIKit)
+    private let generator = UIImpactFeedbackGenerator(style: .medium)
+#endif
+
+    func prepare() {
+#if canImport(UIKit)
+        generator.prepare()
+#endif
+    }
+
+    func impactOccurred(intensity: CGFloat) {
+#if canImport(UIKit)
+        generator.impactOccurred(intensity: intensity)
+#endif
+    }
+}
+
+@MainActor
+private final class ComboFeedback {
+#if canImport(UIKit)
+    private let generator = UINotificationFeedbackGenerator()
+#endif
+
+    func prepare() {
+#if canImport(UIKit)
+        generator.prepare()
+#endif
+    }
+
+    func success() {
+#if canImport(UIKit)
+        generator.notificationOccurred(.success)
+#endif
+    }
 }
 
 @MainActor
@@ -26,15 +74,14 @@ final class GameScene: SKScene {
 
     private let backgroundLayer = SKNode()
     private let backgroundSprite = SKSpriteNode()
-    private let starfieldNode = SKNode()
     private let worldNode = SKNode()
     private let trailLayer = SKNode()
     private let effectsLayer = SKNode()
     private let hudNode = SKNode()
-    private let scoreLabel = SKLabelNode(fontNamed: "Menlo-Bold")
-    private let bestLabel = SKLabelNode(fontNamed: "Menlo-Regular")
-    private let statusLabel = SKLabelNode(fontNamed: "Menlo-Bold")
-    private let hintLabel = SKLabelNode(fontNamed: "Menlo-Regular")
+    private let scoreLabel = SKLabelNode(fontNamed: Theme.FontName.bold)
+    private let bestLabel = SKLabelNode(fontNamed: Theme.FontName.medium)
+    private let statusLabel = SKLabelNode(fontNamed: Theme.FontName.semibold)
+    private let hintLabel = SKLabelNode(fontNamed: Theme.FontName.regular)
     private let launcherNode = SKShapeNode(circleOfRadius: 9)
     private let launcherGlow = SKShapeNode(circleOfRadius: 22)
     private let aimLine = SKShapeNode()
@@ -55,13 +102,13 @@ final class GameScene: SKScene {
     private var trailPool: [SKShapeNode] = []
     private var ballTrailLastSpawn: [Int: TimeInterval] = [:]
 
-    private var dragStart: CGPoint?
+    private var dragOrigin: CGPoint?
     private var currentDrag: CGPoint?
     private var aimStartPoint = CGPoint.zero
     private var aimEndPoint = CGPoint.zero
     private var aimDotPhase: CGFloat = 0
-    private let launchFeedbackGenerator = UIImpactFeedbackGenerator(style: .medium)
-    private let comboFeedbackGenerator = UINotificationFeedbackGenerator()
+    private let launchFeedbackGenerator = LaunchFeedback()
+    private let comboFeedbackGenerator = ComboFeedback()
     private var lastLaunchFeedbackBucket = 0
     private var fixedStepAccumulator: Double = 0
     private var lastUpdateTime: TimeInterval = 0
@@ -73,41 +120,60 @@ final class GameScene: SKScene {
     private var comboCount: Int = 0
     private var hasUsedFirstHint = false
     private var didHaveBallsInFlight = false
-    private var lastGradientSize: CGSize = .zero
+    private var lastBackgroundSize: CGSize = .zero
     private var topSafeArea: CGFloat = 0
     private var bottomSafeArea: CGFloat = 0
+    private var usesLightAppearance = false {
+        didSet { Palette.usesLight = usesLightAppearance }
+    }
 
-    private let gameOverPanel = SKNode()
-    private let gameOverDim = SKShapeNode()
-    private let gameOverTitle = SKLabelNode(fontNamed: "Menlo-Bold")
-    private let gameOverScoreLabel = SKLabelNode(fontNamed: "Menlo-Regular")
-    private let gameOverScoreValue = SKLabelNode(fontNamed: "Menlo-Bold")
-    private let gameOverBestLine = SKLabelNode(fontNamed: "Menlo-Regular")
-    private let gameOverTurnLine = SKLabelNode(fontNamed: "Menlo-Regular")
-    private let restartButton = SKShapeNode()
-    private let restartButtonLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+    var onGameOverChange: ((Bool) -> Void)?
+    private var lastReportedGameOver = false
+
+    private var themePalette: Theme.Palette {
+        Theme.palette(for: usesLightAppearance ? Theme.Mode.light : Theme.Mode.dark)
+    }
+
+    private var sceneBackgroundColor: SKColor { themePalette.background.sk }
+    private var hudPrimaryColor: SKColor      { themePalette.textPrimary.sk }
+    private var hudSecondaryColor: SKColor    { themePalette.textSecondary.sk }
+    private var ceilingBoundaryColor: SKColor { themePalette.border.sk.withAlphaComponent(0.45) }
+    private var dangerBoundaryColor: SKColor  { themePalette.border.sk.withAlphaComponent(0.30) }
+    private var sideBoundaryColor: SKColor    { themePalette.border.sk.withAlphaComponent(0.22) }
+    private var ballFillColor: SKColor        { themePalette.textPrimary.sk }
 
     init(store: SaveStore) {
         self.store = store
-        let loadedState = (try? store.loadSession()) ?? GameEngine.newGame()
+        let loadedState = Self.normalizedLoadedState((try? store.loadSession()) ?? GameEngine.newGame())
         state = loadedState
         lastCompletedState = loadedState
         highScores = (try? store.loadHighScores()) ?? []
         super.init(size: CGSize(width: 390, height: 844))
-        backgroundColor = SKColor.black
+        backgroundColor = sceneBackgroundColor
     }
 
     required init?(coder aDecoder: NSCoder) {
         store = SaveStore()
-        let loadedState = (try? store.loadSession()) ?? GameEngine.newGame()
+        let loadedState = Self.normalizedLoadedState((try? store.loadSession()) ?? GameEngine.newGame())
         state = loadedState
         lastCompletedState = loadedState
         highScores = (try? store.loadHighScores()) ?? []
         super.init(coder: aDecoder)
+        backgroundColor = sceneBackgroundColor
+    }
+
+    private static func normalizedLoadedState(_ loadedState: GameState) -> GameState {
+        var state = loadedState
+        if state.turn == 1, state.score == 0, state.balls.isEmpty {
+            state.launcher = GameConfig.launcher
+        }
+        return state
     }
 
     override func didMove(to view: SKView) {
+#if canImport(UIKit)
         view.isMultipleTouchEnabled = false
+#endif
         view.preferredFramesPerSecond = 120
         refreshSafeArea(from: view)
         setupScene()
@@ -162,33 +228,15 @@ final class GameScene: SKScene {
         renderDynamicNodes()
     }
 
+#if canImport(UIKit)
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
-        let point = touch.location(in: self)
-
-        if state.isGameOver {
-            startNewGame()
-            return
-        }
-
-        guard state.balls.isEmpty, point.distance(to: scenePoint(for: state.launcher)) < 140 else {
-            return
-        }
-
-        dragStart = scenePoint(for: state.launcher)
-        currentDrag = point
-        resetLaunchFeedback()
-        launchFeedbackGenerator.prepare()
-        comboFeedbackGenerator.prepare()
-        animateLauncherPulse(active: true)
-        hideHintLabel()
-        updateAimPreview()
+        beginDrag(at: touch.location(in: self))
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard dragStart != nil, let touch = touches.first else { return }
-        currentDrag = touch.location(in: self)
-        updateAimPreview()
+        guard dragOrigin != nil, let touch = touches.first else { return }
+        updateDrag(to: touch.location(in: self))
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -196,21 +244,45 @@ final class GameScene: SKScene {
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        animateLauncherPulse(active: false)
-        clearAimPreview()
+        cancelDrag()
     }
+#endif
+
+#if os(macOS)
+    override func mouseDown(with event: NSEvent) {
+        beginDrag(at: event.location(in: self))
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        updateDrag(to: event.location(in: self))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        finishDrag()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        cancelDrag()
+    }
+#endif
 
     func persistCompletedTurn() {
         try? store.saveSession(lastCompletedState)
     }
 
+    func setLightAppearance(_ isLight: Bool) {
+        guard usesLightAppearance != isLight else { return }
+        usesLightAppearance = isLight
+        applyTheme()
+    }
+
     private func setupScene() {
         removeAllChildren()
+        backgroundColor = sceneBackgroundColor
 
         addChild(backgroundLayer)
         backgroundLayer.zPosition = -100
         backgroundLayer.addChild(backgroundSprite)
-        backgroundLayer.addChild(starfieldNode)
 
         addChild(worldNode)
         worldNode.addChild(trailLayer)
@@ -226,10 +298,10 @@ final class GameScene: SKScene {
             $0.verticalAlignmentMode = .center
             hudNode.addChild($0)
         }
-        scoreLabel.fontColor = Palette.hudPrimary
-        bestLabel.fontColor = Palette.hudSecondary
-        statusLabel.fontColor = Palette.hudPrimary
-        hintLabel.fontColor = Palette.hudSecondary
+        scoreLabel.fontColor = hudPrimaryColor
+        bestLabel.fontColor = hudSecondaryColor
+        statusLabel.fontColor = hudPrimaryColor
+        hintLabel.fontColor = hudSecondaryColor
         hintLabel.alpha = 0
 
         launcherGlow.fillColor = Palette.launcher.withAlphaComponent(0.18)
@@ -239,7 +311,7 @@ final class GameScene: SKScene {
         worldNode.addChild(launcherGlow)
 
         launcherNode.fillColor = Palette.launcher
-        launcherNode.strokeColor = SKColor.white.withAlphaComponent(0.85)
+        launcherNode.strokeColor = Palette.accent.withAlphaComponent(0.7)
         launcherNode.lineWidth = 1
         launcherNode.zPosition = 2
         worldNode.addChild(launcherNode)
@@ -248,22 +320,17 @@ final class GameScene: SKScene {
         aimLine.zPosition = 3
         worldNode.addChild(aimLine)
 
-        ceilingLine.strokeColor = SKColor(white: 1, alpha: 0.32)
-        ceilingLine.lineWidth = 1.5
         ceilingLine.lineCap = .round
         worldNode.addChild(ceilingLine)
 
-        dangerLine.strokeColor = SKColor(white: 1, alpha: 0.22)
-        dangerLine.lineWidth = 1.0
         dangerLine.lineCap = .round
         worldNode.addChild(dangerLine)
 
         [leftBoundaryLine, rightBoundaryLine].forEach {
-            $0.strokeColor = SKColor(white: 1, alpha: 0.16)
-            $0.lineWidth = 1.0
             $0.lineCap = .round
             worldNode.addChild($0)
         }
+        applyBounceBoundaryStyle(isAiming: false)
 
         failOverlay.fillColor = SKColor(red: 0.78, green: 0.10, blue: 0.08, alpha: 1.0)
         failOverlay.strokeColor = .clear
@@ -272,51 +339,27 @@ final class GameScene: SKScene {
         failOverlay.isHidden = true
         addChild(failOverlay)
 
-        setupGameOverPanel()
+        applyTheme()
 
         layoutStaticNodes()
     }
 
-    private func setupGameOverPanel() {
-        gameOverPanel.zPosition = 300
-        gameOverPanel.alpha = 0
-        gameOverPanel.isHidden = true
-        addChild(gameOverPanel)
-
-        gameOverDim.fillColor = SKColor(white: 0.02, alpha: 0.78)
-        gameOverDim.strokeColor = .clear
-        gameOverPanel.addChild(gameOverDim)
-
-        for label in [gameOverTitle, gameOverScoreLabel, gameOverScoreValue, gameOverBestLine, gameOverTurnLine, restartButtonLabel] {
-            label.horizontalAlignmentMode = .center
-            label.verticalAlignmentMode = .center
-            gameOverPanel.addChild(label)
-        }
-
-        gameOverTitle.fontColor = Palette.danger
-        gameOverTitle.text = "GAME OVER"
-
-        gameOverScoreLabel.fontColor = Palette.hudSecondary
-        gameOverScoreLabel.text = "SCORE"
-
-        gameOverScoreValue.fontColor = Palette.hudPrimary
-
-        gameOverBestLine.fontColor = Palette.hudSecondary
-        gameOverTurnLine.fontColor = Palette.hudSecondary
-
-        restartButton.strokeColor = Palette.accent
-        restartButton.fillColor = Palette.accent.withAlphaComponent(0.12)
-        restartButton.lineWidth = 1.5
-        gameOverPanel.addChild(restartButton)
-        restartButton.zPosition = 1
-
-        restartButtonLabel.fontColor = Palette.accent
-        restartButtonLabel.text = "TAP TO PLAY AGAIN"
-        restartButtonLabel.zPosition = 2
+    private func applyTheme() {
+        backgroundColor = sceneBackgroundColor
+        backgroundSprite.color = sceneBackgroundColor
+        scoreLabel.fontColor = hudPrimaryColor
+        bestLabel.fontColor = hudSecondaryColor
+        statusLabel.fontColor = hudPrimaryColor
+        hintLabel.fontColor = hudSecondaryColor
+        launcherNode.strokeColor = Palette.accent.withAlphaComponent(0.7)
+        launcherNode.fillColor = Palette.launcher
+        ballNodes.values.forEach { updateBallNodeTheme($0) }
+        unusedBallNodes.forEach { updateBallNodeTheme($0) }
+        updateDangerLine()
     }
 
     private func layoutStaticNodes() {
-        rebuildBackgroundIfNeeded()
+        rebuildSolidBackgroundIfNeeded()
 
         scoreLabel.fontSize = 30
         bestLabel.fontSize = 10
@@ -340,8 +383,6 @@ final class GameScene: SKScene {
         statusLabel.position = CGPoint(x: size.width * 0.5, y: statusY)
         let hintY = (launcherY + dangerY) * 0.5
         hintLabel.position = CGPoint(x: size.width * 0.5, y: hintY)
-
-        layoutGameOverPanel()
 
         let ceilingPath = CGMutablePath()
         ceilingPath.move(to: CGPoint(x: size.width * GameConfig.leftWall, y: ceilingY))
@@ -367,84 +408,14 @@ final class GameScene: SKScene {
         failOverlay.position = .zero
     }
 
-    private func layoutGameOverPanel() {
-        gameOverDim.path = CGPath(rect: CGRect(origin: .zero, size: size), transform: nil)
-        gameOverDim.position = .zero
-
-        let centerX = size.width * 0.5
-        let centerY = size.height * 0.55
-
-        gameOverTitle.fontSize = 32
-        gameOverTitle.position = CGPoint(x: centerX, y: centerY + 110)
-
-        gameOverScoreLabel.fontSize = 11
-        gameOverScoreLabel.position = CGPoint(x: centerX, y: centerY + 60)
-
-        gameOverScoreValue.fontSize = 64
-        gameOverScoreValue.position = CGPoint(x: centerX, y: centerY + 16)
-
-        gameOverBestLine.fontSize = 12
-        gameOverBestLine.position = CGPoint(x: centerX, y: centerY - 40)
-
-        gameOverTurnLine.fontSize = 12
-        gameOverTurnLine.position = CGPoint(x: centerX, y: centerY - 60)
-
-        let buttonWidth: CGFloat = 240
-        let buttonHeight: CGFloat = 48
-        let buttonY = centerY - 130
-        restartButton.path = CGPath(
-            roundedRect: CGRect(x: -buttonWidth * 0.5, y: -buttonHeight * 0.5, width: buttonWidth, height: buttonHeight),
-            cornerWidth: 10,
-            cornerHeight: 10,
-            transform: nil
-        )
-        restartButton.position = CGPoint(x: centerX, y: buttonY)
-        restartButtonLabel.fontSize = 14
-        restartButtonLabel.position = CGPoint(x: centerX, y: buttonY)
-    }
-
-    private func rebuildBackgroundIfNeeded() {
-        guard size.width > 0, size.height > 0, size != lastGradientSize else { return }
-        lastGradientSize = size
+    private func rebuildSolidBackgroundIfNeeded() {
+        guard size.width > 0, size.height > 0, size != lastBackgroundSize else { return }
+        lastBackgroundSize = size
         backgroundSprite.size = size
         backgroundSprite.position = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
-        backgroundSprite.texture = makeGradientTexture(size: CGSize(width: 8, height: max(2, size.height)))
-        rebuildStarfield()
-    }
-
-    private func makeGradientTexture(size: CGSize) -> SKTexture {
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let image = renderer.image { context in
-            let cg = context.cgContext
-            let colors = [Palette.bgTop.cgColor, Palette.bgBottom.cgColor] as CFArray
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: [0, 1]) {
-                cg.drawLinearGradient(
-                    gradient,
-                    start: CGPoint(x: 0, y: size.height),
-                    end: CGPoint(x: 0, y: 0),
-                    options: []
-                )
-            }
-        }
-        return SKTexture(image: image)
-    }
-
-    private func rebuildStarfield() {
-        starfieldNode.removeAllChildren()
-        var rng = SeededRandom(seed: 0x5712_9A3F)
-        let starCount = 38
-        for _ in 0..<starCount {
-            let x = CGFloat(Double(rng.next() % 10_000) / 10_000) * size.width
-            let y = CGFloat(Double(rng.next() % 10_000) / 10_000) * size.height
-            let radius = 0.5 + CGFloat(Double(rng.next() % 100) / 100) * 1.0
-            let alpha = 0.10 + CGFloat(Double(rng.next() % 100) / 100) * 0.18
-            let star = SKShapeNode(circleOfRadius: radius)
-            star.fillColor = SKColor(white: 1, alpha: alpha)
-            star.strokeColor = .clear
-            star.position = CGPoint(x: x, y: y)
-            starfieldNode.addChild(star)
-        }
+        backgroundSprite.texture = nil
+        backgroundSprite.color = sceneBackgroundColor
+        backgroundSprite.colorBlendFactor = 1
     }
 
     private func renderAll() {
@@ -475,7 +446,7 @@ final class GameScene: SKScene {
             && state.balls.isEmpty
             && !hasUsedFirstHint
         if shouldShow {
-            hintLabel.text = "swipe down to aim ↓"
+            hintLabel.text = "pull down to aim ↓"
             if hintLabel.action(forKey: "hint") == nil {
                 hintLabel.removeAllActions()
                 hintLabel.alpha = 0
@@ -565,7 +536,13 @@ final class GameScene: SKScene {
     }
 
     private func updateDangerLine() {
+        guard dragOrigin == nil else {
+            applyBounceBoundaryStyle(isAiming: true)
+            return
+        }
+
         let lowestRow = state.bricks.map(\.row).max() ?? 0
+        applyBounceBoundaryStyle(isAiming: false)
         if lowestRow >= 7 {
             dangerLine.strokeColor = Palette.danger.withAlphaComponent(0.55)
             if dangerLine.action(forKey: "pulse") == nil {
@@ -578,7 +555,21 @@ final class GameScene: SKScene {
         } else {
             dangerLine.removeAction(forKey: "pulse")
             dangerLine.alpha = 1
-            dangerLine.strokeColor = SKColor(white: 1, alpha: 0.22)
+        }
+    }
+
+    private func applyBounceBoundaryStyle(isAiming: Bool) {
+        ceilingLine.strokeColor = isAiming ? Palette.accent.withAlphaComponent(0.72) : ceilingBoundaryColor
+        ceilingLine.lineWidth = isAiming ? 2.5 : 1.5
+
+        dangerLine.removeAction(forKey: "pulse")
+        dangerLine.alpha = 1
+        dangerLine.strokeColor = isAiming ? Palette.accent.withAlphaComponent(0.55) : dangerBoundaryColor
+        dangerLine.lineWidth = isAiming ? 2.0 : 1.0
+
+        [leftBoundaryLine, rightBoundaryLine].forEach {
+            $0.strokeColor = isAiming ? Palette.accent.withAlphaComponent(0.42) : sideBoundaryColor
+            $0.lineWidth = isAiming ? 1.75 : 1.0
         }
     }
 
@@ -654,27 +645,51 @@ final class GameScene: SKScene {
         }
     }
 
+    private func beginDrag(at point: CGPoint) {
+        if state.isGameOver {
+            startNewGame()
+            return
+        }
+
+        guard state.balls.isEmpty else { return }
+
+        dragOrigin = point
+        currentDrag = point
+        resetLaunchFeedback()
+        launchFeedbackGenerator.prepare()
+        comboFeedbackGenerator.prepare()
+        animateLauncherPulse(active: true)
+        applyBounceBoundaryStyle(isAiming: true)
+        hideHintLabel()
+        updateAimPreview()
+    }
+
+    private func updateDrag(to point: CGPoint) {
+        guard dragOrigin != nil else { return }
+        currentDrag = point
+        updateAimPreview()
+    }
+
     private func finishDrag() {
         defer {
             resetLaunchFeedback()
             animateLauncherPulse(active: false)
             clearAimPreview()
         }
-        guard let start = dragStart, let current = currentDrag, state.balls.isEmpty, !state.isGameOver else {
-            return
-        }
-
-        let pullPoint = Vec2(x: Double(start.x - current.x) / Double(size.width), y: Double(start.y - current.y) / Double(size.height))
-        let distance = start.distance(to: current) / min(size.width, size.height)
-        guard distance > 0.035 else { return }
+        guard state.balls.isEmpty, !state.isGameOver, let aim = currentAimIntent() else { return }
 
         hasUsedFirstHint = true
         AudioManager.shared.play(.launch)
         emitLauncherRing()
-        GameEngine.beginLaunch(state: &state, pull: pullPoint, pullDistance: distance)
+        GameEngine.beginLaunch(state: &state, direction: aim.direction, pullDistance: aim.distance)
         comboCount = 0
         didHaveBallsInFlight = true
         renderDynamicNodes()
+    }
+
+    private func cancelDrag() {
+        animateLauncherPulse(active: false)
+        clearAimPreview()
     }
 
     private func completeTurn() {
@@ -704,9 +719,6 @@ final class GameScene: SKScene {
         failOverlay.isHidden = true
         statusLabel.removeAllActions()
         statusLabel.alpha = 0
-        gameOverPanel.removeAllActions()
-        gameOverPanel.alpha = 0
-        gameOverPanel.isHidden = true
         state = GameEngine.newGame()
         lastCompletedState = state
         didRecordGameOverScore = false
@@ -717,33 +729,54 @@ final class GameScene: SKScene {
         try? store.saveSession(state)
         clearAimPreview()
         renderAll()
+        notifyGameOverChange()
     }
 
     private func updateAimPreview() {
-        guard let start = dragStart, let current = currentDrag else { return }
-        let pullPoint = Vec2(x: Double(start.x - current.x) / Double(size.width), y: Double(start.y - current.y) / Double(size.height))
-        let direction = GameEngine.normalizedLaunchVector(fromPull: pullPoint)
-        let strength = GameEngine.launchStrength(forPullDistance: start.distance(to: current) / min(size.width, size.height))
-        let previewLength = (70 + 110 * strength)
+        guard let aim = currentAimIntent() else {
+            hideAimPreview()
+            return
+        }
+
+        let launcherPoint = scenePoint(for: state.launcher)
+        let previewLength = 110 + 190 * aim.strength
+        let sceneDirection = sceneUnitVector(for: aim.direction)
 
         let end = CGPoint(
-            x: start.x + direction.x * previewLength,
-            y: start.y + direction.y * previewLength
+            x: launcherPoint.x + sceneDirection.dx * previewLength,
+            y: launcherPoint.y + sceneDirection.dy * previewLength
         )
 
-        aimStartPoint = start
+        aimStartPoint = launcherPoint
         aimEndPoint = end
-        aimLine.alpha = 0.45 + 0.45 * strength
+        aimLine.alpha = 0.45 + 0.45 * aim.strength
         aimLine.isHidden = false
-        layoutAimDots(strength: CGFloat(strength))
+        layoutAimDots(strength: CGFloat(aim.strength))
         startAimLineAnimationIfNeeded()
-        triggerStrengthFeedbackIfNeeded(strength: strength)
+        triggerStrengthFeedbackIfNeeded(strength: aim.strength)
+    }
+
+    private func currentAimIntent() -> (direction: Vec2, strength: Double, distance: Double)? {
+        guard let origin = dragOrigin, let current = currentDrag, size.width > 0, size.height > 0 else { return nil }
+
+        let pull = Vec2(x: Double(origin.x - current.x) / Double(size.width), y: Double(origin.y - current.y) / Double(size.height))
+        let distance = origin.distance(to: current) / min(size.width, size.height)
+        guard distance > 0.035, let direction = GameEngine.validAimVector(fromPull: pull, launcher: state.launcher) else {
+            return nil
+        }
+
+        return (direction, GameEngine.launchStrength(forPullDistance: distance), distance)
     }
 
     private func clearAimPreview() {
         resetLaunchFeedback()
-        dragStart = nil
+        dragOrigin = nil
         currentDrag = nil
+        hideAimPreview()
+        updateDangerLine()
+    }
+
+    private func hideAimPreview() {
         aimLine.isHidden = true
         aimLine.removeAction(forKey: "dash")
         aimDotPhase = 0
@@ -879,7 +912,7 @@ final class GameScene: SKScene {
 
     private func spawnComboLabelIfNeeded(at point: CGPoint) {
         guard comboCount >= 2 else { return }
-        let label = SKLabelNode(fontNamed: "Menlo-Bold")
+        let label = SKLabelNode(fontNamed: Theme.FontName.bold)
         label.text = "x\(comboCount)"
         label.fontSize = 18 + CGFloat(min(comboCount, 8)) * 1.4
         label.fontColor = comboCount >= 5 ? Palette.pickup : Palette.accent
@@ -904,7 +937,7 @@ final class GameScene: SKScene {
         ]))
 
         if comboCount == 3 || comboCount == 5 || comboCount == 8 {
-            comboFeedbackGenerator.notificationOccurred(.success)
+            comboFeedbackGenerator.success()
             comboFeedbackGenerator.prepare()
         }
     }
@@ -1033,38 +1066,24 @@ final class GameScene: SKScene {
         ])
         failOverlay.run(pulse)
 
-        showGameOverPanel()
+        notifyGameOverChange()
         requestShake(intensity: 5, duration: 0.4)
     }
 
-    private func showGameOverPanel() {
-        let bestScore = highScores.first?.score ?? state.score
-        gameOverScoreValue.text = "\(state.score)"
-        gameOverBestLine.text  = "BEST   \(bestScore)"
-        gameOverTurnLine.text  = "TURN   \(state.turn)"
+    private func notifyGameOverChange() {
+        if lastReportedGameOver != state.isGameOver {
+            lastReportedGameOver = state.isGameOver
+            onGameOverChange?(state.isGameOver)
+        }
+    }
 
-        gameOverPanel.removeAllActions()
-        gameOverPanel.alpha = 0
-        gameOverPanel.isHidden = false
-        gameOverPanel.setScale(0.96)
+    var currentScore: Int { state.score }
+    var currentTurn: Int { state.turn }
+    var currentBestScore: Int { highScores.first?.score ?? state.score }
+    var isGameOver: Bool { state.isGameOver }
 
-        let pulse = SKAction.sequence([
-            .scale(to: 1.06, duration: 0.9),
-            .scale(to: 1.0, duration: 0.9)
-        ])
-        pulse.timingMode = .easeInEaseOut
-        restartButton.removeAllActions()
-        restartButton.run(.repeatForever(pulse))
-
-        let appear = SKAction.group([
-            .fadeAlpha(to: 1, duration: 0.35),
-            .scale(to: 1.0, duration: 0.35)
-        ])
-        appear.timingMode = .easeOut
-        gameOverPanel.run(.sequence([
-            .wait(forDuration: 0.55),
-            appear
-        ]))
+    func restartGame() {
+        startNewGame()
     }
 
     private func dequeueBrickNode() -> SKShapeNode {
@@ -1094,7 +1113,7 @@ final class GameScene: SKScene {
         highlight.zPosition = 0.5
         node.addChild(highlight)
 
-        let label = SKLabelNode(fontNamed: "Menlo-Bold")
+        let label = SKLabelNode(fontNamed: Theme.FontName.bold)
         label.name = "hp"
         label.fontColor = .white
         label.horizontalAlignmentMode = .center
@@ -1151,18 +1170,24 @@ final class GameScene: SKScene {
     }
 
     private func brickColor(for brick: Brick) -> SKColor {
+        // Low health = healthy accent, high health = destructive red.
+        // Pass through pickup gold at mid-range so the gradient stays vivid.
         let healthScale = max(4, state.turn + 5)
-        let normalizedHealth = min(1, Double(brick.hitPoints) / Double(healthScale))
-        let hue = CGFloat(0.58 - 0.58 * normalizedHealth)
-        let saturation = CGFloat(0.62 + 0.30 * normalizedHealth)
-        let brightness = CGFloat(0.55 + 0.30 * min(1, normalizedHealth + 0.18))
-        return SKColor(hue: hue, saturation: saturation, brightness: brightness, alpha: 1)
+        let t = CGFloat(min(1, Double(brick.hitPoints) / Double(healthScale)))
+        let healthy = Palette.accent
+        let mid = Palette.pickup
+        let wounded = Palette.danger
+        if t < 0.5 {
+            return healthy.blended(to: mid, fraction: t * 2)
+        } else {
+            return mid.blended(to: wounded, fraction: (t - 0.5) * 2)
+        }
     }
 
     private func brickStrokeColor(for brick: Brick) -> SKColor {
         let healthScale = max(4, state.turn + 5)
-        let normalizedHealth = min(1, Double(brick.hitPoints) / Double(healthScale))
-        return SKColor(white: 0.85 + 0.15 * CGFloat(1 - normalizedHealth), alpha: 0.32)
+        let t = CGFloat(min(1, Double(brick.hitPoints) / Double(healthScale)))
+        return Palette.textPrimary.withAlphaComponent(0.20 + 0.15 * (1 - t))
     }
 
     private func dequeueBallNode() -> SKShapeNode {
@@ -1173,17 +1198,24 @@ final class GameScene: SKScene {
 
         let radius = max(4, min(size.width, size.height) * 0.014)
         let node = SKShapeNode(circleOfRadius: radius)
-        node.fillColor = .white
-        node.strokeColor = Palette.accent
         node.lineWidth = 1
         node.zPosition = 5
 
         let glow = SKShapeNode(circleOfRadius: radius * 2.4)
-        glow.fillColor = Palette.accent.withAlphaComponent(0.18)
         glow.strokeColor = .clear
         glow.zPosition = -1
         node.addChild(glow)
+        updateBallNodeTheme(node)
         return node
+    }
+
+    private func updateBallNodeTheme(_ node: SKShapeNode) {
+        node.fillColor = Palette.accent
+        node.strokeColor = .clear
+        node.lineWidth = 0
+        if let glow = node.children.first as? SKShapeNode {
+            glow.fillColor = Palette.accent.withAlphaComponent(0.22)
+        }
     }
 
     private func recycleBallNode(id: Int, node: SKShapeNode) {
@@ -1263,6 +1295,13 @@ final class GameScene: SKScene {
 
     private func scenePoint(for point: Vec2) -> CGPoint {
         CGPoint(x: point.x * Double(size.width), y: point.y * Double(size.height))
+    }
+
+    private func sceneUnitVector(for direction: Vec2) -> CGVector {
+        let dx = CGFloat(direction.x) * size.width
+        let dy = CGFloat(direction.y) * size.height
+        let length = max(0.000_001, sqrt(dx * dx + dy * dy))
+        return CGVector(dx: dx / length, dy: dy / length)
     }
 
     private func sceneRect(for brick: Brick) -> CGRect {

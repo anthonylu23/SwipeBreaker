@@ -16,10 +16,26 @@ final class AudioManager {
 
     var isEnabled: Bool {
         get { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: enabledKey)
+            mixer.outputVolume = newValue ? volume : 0
+        }
+    }
+
+    var volume: Float {
+        get {
+            guard UserDefaults.standard.object(forKey: volumeKey) != nil else { return 0.8 }
+            return max(0, min(1, UserDefaults.standard.float(forKey: volumeKey)))
+        }
+        set {
+            let clamped = max(0, min(1, newValue))
+            UserDefaults.standard.set(clamped, forKey: volumeKey)
+            mixer.outputVolume = isEnabled ? clamped : 0
+        }
     }
 
     private let enabledKey = "swipebreaker.audio.enabled"
+    private let volumeKey = "swipebreaker.audio.volume"
     private let engine = AVAudioEngine()
     private let mixer = AVAudioMixerNode()
     private var players: [Sound: AVAudioPlayerNode] = [:]
@@ -30,6 +46,7 @@ final class AudioManager {
     private init() {
         engine.attach(mixer)
         engine.connect(mixer, to: engine.mainMixerNode, format: nil)
+        mixer.outputVolume = isEnabled ? volume : 0
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
 
         let recipes: [(Sound, Double, Double, Double, Float)] = [
@@ -60,6 +77,10 @@ final class AudioManager {
         guard let player = players[sound], let buffer = buffers[sound] else { return }
         player.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
         if !player.isPlaying { player.play() }
+    }
+
+    func preview() {
+        play(.pickup)
     }
 
     private func startIfNeeded() {
