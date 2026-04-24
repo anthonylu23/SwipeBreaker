@@ -31,10 +31,10 @@ final class GameScene: SKScene {
     private let trailLayer = SKNode()
     private let effectsLayer = SKNode()
     private let hudNode = SKNode()
-    private let scoreLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
-    private let bestLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
-    private let statusLabel = SKLabelNode(fontNamed: "AvenirNext-DemiBold")
-    private let hintLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
+    private let scoreLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let bestLabel = SKLabelNode(fontNamed: "Menlo-Regular")
+    private let statusLabel = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let hintLabel = SKLabelNode(fontNamed: "Menlo-Regular")
     private let launcherNode = SKShapeNode(circleOfRadius: 9)
     private let launcherGlow = SKShapeNode(circleOfRadius: 22)
     private let aimLine = SKShapeNode()
@@ -74,6 +74,18 @@ final class GameScene: SKScene {
     private var hasUsedFirstHint = false
     private var didHaveBallsInFlight = false
     private var lastGradientSize: CGSize = .zero
+    private var topSafeArea: CGFloat = 0
+    private var bottomSafeArea: CGFloat = 0
+
+    private let gameOverPanel = SKNode()
+    private let gameOverDim = SKShapeNode()
+    private let gameOverTitle = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let gameOverScoreLabel = SKLabelNode(fontNamed: "Menlo-Regular")
+    private let gameOverScoreValue = SKLabelNode(fontNamed: "Menlo-Bold")
+    private let gameOverBestLine = SKLabelNode(fontNamed: "Menlo-Regular")
+    private let gameOverTurnLine = SKLabelNode(fontNamed: "Menlo-Regular")
+    private let restartButton = SKShapeNode()
+    private let restartButtonLabel = SKLabelNode(fontNamed: "Menlo-Bold")
 
     init(store: SaveStore) {
         self.store = store
@@ -97,14 +109,21 @@ final class GameScene: SKScene {
     override func didMove(to view: SKView) {
         view.isMultipleTouchEnabled = false
         view.preferredFramesPerSecond = 120
+        refreshSafeArea(from: view)
         setupScene()
         renderAll()
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
         super.didChangeSize(oldSize)
+        if let view { refreshSafeArea(from: view) }
         layoutStaticNodes()
         renderAll()
+    }
+
+    private func refreshSafeArea(from view: SKView) {
+        topSafeArea = view.safeAreaInsets.top
+        bottomSafeArea = view.safeAreaInsets.bottom
     }
 
     override func update(_ currentTime: TimeInterval) {
@@ -253,32 +272,82 @@ final class GameScene: SKScene {
         failOverlay.isHidden = true
         addChild(failOverlay)
 
+        setupGameOverPanel()
+
         layoutStaticNodes()
+    }
+
+    private func setupGameOverPanel() {
+        gameOverPanel.zPosition = 300
+        gameOverPanel.alpha = 0
+        gameOverPanel.isHidden = true
+        addChild(gameOverPanel)
+
+        gameOverDim.fillColor = SKColor(white: 0.02, alpha: 0.78)
+        gameOverDim.strokeColor = .clear
+        gameOverPanel.addChild(gameOverDim)
+
+        for label in [gameOverTitle, gameOverScoreLabel, gameOverScoreValue, gameOverBestLine, gameOverTurnLine, restartButtonLabel] {
+            label.horizontalAlignmentMode = .center
+            label.verticalAlignmentMode = .center
+            gameOverPanel.addChild(label)
+        }
+
+        gameOverTitle.fontColor = Palette.danger
+        gameOverTitle.text = "GAME OVER"
+
+        gameOverScoreLabel.fontColor = Palette.hudSecondary
+        gameOverScoreLabel.text = "SCORE"
+
+        gameOverScoreValue.fontColor = Palette.hudPrimary
+
+        gameOverBestLine.fontColor = Palette.hudSecondary
+        gameOverTurnLine.fontColor = Palette.hudSecondary
+
+        restartButton.strokeColor = Palette.accent
+        restartButton.fillColor = Palette.accent.withAlphaComponent(0.12)
+        restartButton.lineWidth = 1.5
+        gameOverPanel.addChild(restartButton)
+        restartButton.zPosition = 1
+
+        restartButtonLabel.fontColor = Palette.accent
+        restartButtonLabel.text = "TAP TO PLAY AGAIN"
+        restartButtonLabel.zPosition = 2
     }
 
     private func layoutStaticNodes() {
         rebuildBackgroundIfNeeded()
 
-        scoreLabel.fontSize = 38
-        bestLabel.fontSize = 11
-        statusLabel.fontSize = 14
-        hintLabel.fontSize = 13
-
-        scoreLabel.position = CGPoint(x: size.width * 0.5, y: size.height - 56)
-        bestLabel.position = CGPoint(x: size.width * 0.5, y: size.height - 86)
-        statusLabel.position = CGPoint(x: size.width * 0.5, y: size.height * 0.055)
-        hintLabel.position = CGPoint(x: size.width * 0.5, y: size.height * GameConfig.launcher.y + 36)
+        scoreLabel.fontSize = 30
+        bestLabel.fontSize = 10
+        statusLabel.fontSize = 13
+        hintLabel.fontSize = 12
 
         launcherNode.position = scenePoint(for: state.launcher)
         launcherGlow.position = launcherNode.position
 
         let ceilingY = size.height * GameConfig.topWall
+        let dangerY = size.height * GameConfig.boardBottom
+        let launcherY = size.height * GameConfig.launcher.y
+
+        let hudTopAvailable = size.height - max(topSafeArea, 10) - 8
+        let scoreY = max(ceilingY + 24, hudTopAvailable - 18)
+        let bestY = max(ceilingY + 8, scoreY - 26)
+        scoreLabel.position = CGPoint(x: size.width * 0.5, y: scoreY)
+        bestLabel.position = CGPoint(x: size.width * 0.5, y: bestY)
+
+        let statusY = max(bottomSafeArea + 16, launcherY * 0.45)
+        statusLabel.position = CGPoint(x: size.width * 0.5, y: statusY)
+        let hintY = (launcherY + dangerY) * 0.5
+        hintLabel.position = CGPoint(x: size.width * 0.5, y: hintY)
+
+        layoutGameOverPanel()
+
         let ceilingPath = CGMutablePath()
         ceilingPath.move(to: CGPoint(x: size.width * GameConfig.leftWall, y: ceilingY))
         ceilingPath.addLine(to: CGPoint(x: size.width * GameConfig.rightWall, y: ceilingY))
         ceilingLine.path = ceilingPath
 
-        let dangerY = size.height * GameConfig.boardBottom
         let path = CGMutablePath()
         path.move(to: CGPoint(x: size.width * GameConfig.leftWall, y: dangerY))
         path.addLine(to: CGPoint(x: size.width * GameConfig.rightWall, y: dangerY))
@@ -296,6 +365,42 @@ final class GameScene: SKScene {
 
         failOverlay.path = CGPath(rect: CGRect(origin: .zero, size: size), transform: nil)
         failOverlay.position = .zero
+    }
+
+    private func layoutGameOverPanel() {
+        gameOverDim.path = CGPath(rect: CGRect(origin: .zero, size: size), transform: nil)
+        gameOverDim.position = .zero
+
+        let centerX = size.width * 0.5
+        let centerY = size.height * 0.55
+
+        gameOverTitle.fontSize = 32
+        gameOverTitle.position = CGPoint(x: centerX, y: centerY + 110)
+
+        gameOverScoreLabel.fontSize = 11
+        gameOverScoreLabel.position = CGPoint(x: centerX, y: centerY + 60)
+
+        gameOverScoreValue.fontSize = 64
+        gameOverScoreValue.position = CGPoint(x: centerX, y: centerY + 16)
+
+        gameOverBestLine.fontSize = 12
+        gameOverBestLine.position = CGPoint(x: centerX, y: centerY - 40)
+
+        gameOverTurnLine.fontSize = 12
+        gameOverTurnLine.position = CGPoint(x: centerX, y: centerY - 60)
+
+        let buttonWidth: CGFloat = 240
+        let buttonHeight: CGFloat = 48
+        let buttonY = centerY - 130
+        restartButton.path = CGPath(
+            roundedRect: CGRect(x: -buttonWidth * 0.5, y: -buttonHeight * 0.5, width: buttonWidth, height: buttonHeight),
+            cornerWidth: 10,
+            cornerHeight: 10,
+            transform: nil
+        )
+        restartButton.position = CGPoint(x: centerX, y: buttonY)
+        restartButtonLabel.fontSize = 14
+        restartButtonLabel.position = CGPoint(x: centerX, y: buttonY)
     }
 
     private func rebuildBackgroundIfNeeded() {
@@ -353,16 +458,13 @@ final class GameScene: SKScene {
     private func renderHUD() {
         scoreLabel.text = "\(state.score)"
         let bestScore = highScores.first?.score ?? 0
-        bestLabel.text = "BEST  \(bestScore)    TURN  \(state.turn)    BALLS  \(state.ballCount)"
+        bestLabel.text = "BEST \(bestScore)   TURN \(state.turn)   BALLS \(state.ballCount)"
         if state.isGameOver {
-            statusLabel.text = "TAP TO RESTART"
+            statusLabel.text = ""
+            statusLabel.alpha = 0
         } else {
-            statusLabel.text = "READY"
-            if state.balls.isEmpty {
-                statusLabel.alpha = 0.65
-            } else {
-                statusLabel.alpha = 0
-            }
+            statusLabel.text = "SWIPE TO LAUNCH"
+            statusLabel.alpha = state.balls.isEmpty ? 0.5 : 0
         }
     }
 
@@ -602,6 +704,9 @@ final class GameScene: SKScene {
         failOverlay.isHidden = true
         statusLabel.removeAllActions()
         statusLabel.alpha = 0
+        gameOverPanel.removeAllActions()
+        gameOverPanel.alpha = 0
+        gameOverPanel.isHidden = true
         state = GameEngine.newGame()
         lastCompletedState = state
         didRecordGameOverScore = false
@@ -774,7 +879,7 @@ final class GameScene: SKScene {
 
     private func spawnComboLabelIfNeeded(at point: CGPoint) {
         guard comboCount >= 2 else { return }
-        let label = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+        let label = SKLabelNode(fontNamed: "Menlo-Bold")
         label.text = "x\(comboCount)"
         label.fontSize = 18 + CGFloat(min(comboCount, 8)) * 1.4
         label.fontColor = comboCount >= 5 ? Palette.pickup : Palette.accent
@@ -915,7 +1020,7 @@ final class GameScene: SKScene {
                 .moveBy(x: 8, y: 0, duration: 0.07),
                 .moveBy(x: -4, y: 0, duration: 0.035)
             ])
-            let dim = SKAction.fadeAlpha(to: 0.45, duration: 0.6)
+            let dim = SKAction.fadeAlpha(to: 0.35, duration: 0.6)
             node.run(.group([.repeat(jitter, count: 3), dim]), withKey: "fail")
         }
 
@@ -928,13 +1033,38 @@ final class GameScene: SKScene {
         ])
         failOverlay.run(pulse)
 
-        statusLabel.alpha = 0
-        statusLabel.text = "TAP TO RESTART"
-        statusLabel.run(.sequence([
-            .wait(forDuration: 0.55),
-            .fadeAlpha(to: 0.95, duration: 0.35)
-        ]))
+        showGameOverPanel()
         requestShake(intensity: 5, duration: 0.4)
+    }
+
+    private func showGameOverPanel() {
+        let bestScore = highScores.first?.score ?? state.score
+        gameOverScoreValue.text = "\(state.score)"
+        gameOverBestLine.text  = "BEST   \(bestScore)"
+        gameOverTurnLine.text  = "TURN   \(state.turn)"
+
+        gameOverPanel.removeAllActions()
+        gameOverPanel.alpha = 0
+        gameOverPanel.isHidden = false
+        gameOverPanel.setScale(0.96)
+
+        let pulse = SKAction.sequence([
+            .scale(to: 1.06, duration: 0.9),
+            .scale(to: 1.0, duration: 0.9)
+        ])
+        pulse.timingMode = .easeInEaseOut
+        restartButton.removeAllActions()
+        restartButton.run(.repeatForever(pulse))
+
+        let appear = SKAction.group([
+            .fadeAlpha(to: 1, duration: 0.35),
+            .scale(to: 1.0, duration: 0.35)
+        ])
+        appear.timingMode = .easeOut
+        gameOverPanel.run(.sequence([
+            .wait(forDuration: 0.55),
+            appear
+        ]))
     }
 
     private func dequeueBrickNode() -> SKShapeNode {
@@ -964,7 +1094,7 @@ final class GameScene: SKScene {
         highlight.zPosition = 0.5
         node.addChild(highlight)
 
-        let label = SKLabelNode(fontNamed: "AvenirNext-Bold")
+        let label = SKLabelNode(fontNamed: "Menlo-Bold")
         label.name = "hp"
         label.fontColor = .white
         label.horizontalAlignmentMode = .center

@@ -6,10 +6,10 @@ struct GameConfig {
     static let dangerRow = 9
     static let leftWall = 0.055
     static let rightWall = 0.945
-    static let topWall = 0.885
-    static let boardTop = 0.82
-    static let boardBottom = 0.18
-    static let launcher = Vec2(x: 0.5, y: 0.105)
+    static let topWall = 0.82
+    static let boardTop = 0.80
+    static let boardBottom = 0.22
+    static let launcher = Vec2(x: 0.5, y: 0.115)
     static let ballRadius = 0.012
     static let minLaunchSpeed = 0.72
     static let maxLaunchSpeed = 1.485
