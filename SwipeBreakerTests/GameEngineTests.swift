@@ -156,6 +156,120 @@ final class GameEngineTests: XCTestCase {
         }
     }
 
+    func testRegularPickupStillAddsOnePendingExtraBallByDefault() {
+        var state = pickupCollisionState(kind: .regular, rngSeed: 1)
+
+        var events = TurnEvents()
+        _ = GameEngine.stepActiveTurn(state: &state, dt: 1.0 / 120.0, events: &events)
+
+        XCTAssertEqual(state.pendingExtraBalls, 1)
+        XCTAssertNil(state.queuedMysteryEffect)
+        XCTAssertEqual(events.pickups.first?.kind, .regular)
+    }
+
+    func testMysteryRowsSpawnDeterministicallyWithoutOverlaps() {
+        let firstPass = (1...100).map { GameEngine.newGame(seed: UInt64($0)).pickups }
+        let secondPass = (1...100).map { GameEngine.newGame(seed: UInt64($0)).pickups }
+
+        XCTAssertEqual(firstPass, secondPass)
+        XCTAssertTrue(firstPass.contains { pickups in pickups.contains { $0.kind == .mystery } })
+
+        for seed in 1...100 {
+            let state = GameEngine.newGame(seed: UInt64(seed))
+            let occupiedColumns = Set(state.bricks.map(\.column))
+            let pickupCoordinates = Set(state.pickups.map(\.coordinate))
+
+            XCTAssertEqual(pickupCoordinates.count, state.pickups.count)
+            XCTAssertTrue(state.pickups.allSatisfy { !occupiedColumns.contains($0.column) })
+            XCTAssertEqual(state.pickups.filter { $0.kind == .regular }.count, 1)
+            XCTAssertLessThanOrEqual(state.pickups.filter { $0.kind == .mystery }.count, 1)
+        }
+    }
+
+    func testMysteryEffectResolutionIsDeterministicFromSeed() {
+        var first = pickupCollisionState(kind: .mystery, rngSeed: 35)
+        var second = pickupCollisionState(kind: .mystery, rngSeed: 35)
+
+        var firstEvents = TurnEvents()
+        var secondEvents = TurnEvents()
+        _ = GameEngine.stepActiveTurn(state: &first, dt: 1.0 / 120.0, events: &firstEvents)
+        _ = GameEngine.stepActiveTurn(state: &second, dt: 1.0 / 120.0, events: &secondEvents)
+
+        XCTAssertEqual(first.queuedMysteryEffect, .halfBallsNextLaunch)
+        XCTAssertEqual(first.queuedMysteryEffect, second.queuedMysteryEffect)
+        XCTAssertEqual(firstEvents.pickups.first?.mysteryEffect, secondEvents.pickups.first?.mysteryEffect)
+    }
+
+    func testTemporaryLaunchCountEffectsDoNotMutatePermanentBallCount() {
+        XCTAssertEqual(GameEngine.effectiveLaunchBallCount(baseCount: 5, effect: .doubleBallsNextLaunch), 10)
+        XCTAssertEqual(GameEngine.effectiveLaunchBallCount(baseCount: 5, effect: .halfBallsNextLaunch), 2)
+        XCTAssertEqual(GameEngine.effectiveLaunchBallCount(baseCount: 5, effect: .deleteBallsNextLaunch), 2)
+
+        var state = GameEngine.newGame(seed: 1)
+        state.bricks = []
+        state.pickups = []
+        state.ballCount = 5
+        state.queuedMysteryEffect = .doubleBallsNextLaunch
+
+        GameEngine.beginLaunch(state: &state, direction: Vec2(x: 0, y: 1), pullDistance: 1)
+
+        XCTAssertEqual(state.balls.count, 10)
+        XCTAssertEqual(state.ballCount, 5)
+        XCTAssertNil(state.queuedMysteryEffect)
+        XCTAssertEqual(state.activeMysteryEffect, .doubleBallsNextLaunch)
+
+        state.balls = []
+        GameEngine.resolveTurn(state: &state)
+
+        XCTAssertEqual(state.ballCount, 5)
+        XCTAssertNil(state.activeMysteryEffect)
+    }
+
+    func testDoubleRegularPickupValueMakesRegularPickupsWorthTwoForOneTurn() {
+        var state = pickupCollisionState(kind: .regular, rngSeed: 1)
+        state.activeMysteryEffect = .doubleRegularPickupValue
+
+        var events = TurnEvents()
+        _ = GameEngine.stepActiveTurn(state: &state, dt: 1.0 / 120.0, events: &events)
+
+        XCTAssertEqual(state.pendingExtraBalls, 2)
+
+        state.balls = []
+        GameEngine.resolveTurn(state: &state)
+
+        XCTAssertNil(state.activeMysteryEffect)
+    }
+
+    func testMysteryPenaltiesKeepAtLeastOneEffectiveLaunchBall() {
+        XCTAssertEqual(GameEngine.effectiveLaunchBallCount(baseCount: 1, effect: .halfBallsNextLaunch), 1)
+        XCTAssertEqual(GameEngine.effectiveLaunchBallCount(baseCount: 1, effect: .deleteBallsNextLaunch), 1)
+        XCTAssertEqual(GameEngine.effectiveLaunchBallCount(baseCount: 2, effect: .deleteBallsNextLaunch), 1)
+    }
+
+    func testOldSaveShapeDecodesRegularPickupsAndNoMysteryEffect() throws {
+        let json = """
+        {
+          "score": 0,
+          "turn": 1,
+          "ballCount": 1,
+          "launcher": { "x": 0.5, "y": 0.17 },
+          "bricks": [],
+          "pickups": [{ "column": 3, "row": 0 }],
+          "balls": [],
+          "pendingExtraBalls": 0,
+          "nextBallID": 1,
+          "rngSeed": 42,
+          "isGameOver": false
+        }
+        """.data(using: .utf8)!
+
+        let state = try JSONDecoder().decode(GameState.self, from: json)
+
+        XCTAssertEqual(state.pickups.first?.kind, .regular)
+        XCTAssertNil(state.queuedMysteryEffect)
+        XCTAssertNil(state.activeMysteryEffect)
+    }
+
     func testBallBouncesOffWall() {
         var state = GameEngine.newGame(seed: 1)
         state.bricks = []
@@ -393,6 +507,34 @@ final class GameEngineTests: XCTestCase {
             pendingExtraBalls: 0,
             nextBallID: 2,
             rngSeed: 1,
+            isGameOver: false
+        )
+    }
+
+    private func pickupCollisionState(kind: PickupKind, rngSeed: UInt64) -> GameState {
+        let rect = GameEngine.brickRect(column: 3, row: 3)
+        let center = Vec2(x: (rect.minX + rect.maxX) * 0.5, y: (rect.minY + rect.maxY) * 0.5)
+        return GameState(
+            score: 0,
+            turn: 1,
+            ballCount: 1,
+            launcher: GameConfig.launcher,
+            bricks: [],
+            pickups: [ExtraBallPickup(column: 3, row: 3, kind: kind)],
+            balls: [
+                BallState(
+                    id: 1,
+                    position: center,
+                    previousPosition: center,
+                    velocity: .zero,
+                    launchDelay: 0,
+                    isActive: true,
+                    isFinished: false
+                )
+            ],
+            pendingExtraBalls: 0,
+            nextBallID: 2,
+            rngSeed: rngSeed,
             isGameOver: false
         )
     }

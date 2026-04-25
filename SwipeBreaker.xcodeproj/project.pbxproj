@@ -21,6 +21,7 @@
 		1A00000100000000000000C1 /* IBMPlexMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000000B1 /* IBMPlexMono-Medium.ttf */; };
 		1A00000100000000000000C2 /* IBMPlexMono-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000000B2 /* IBMPlexMono-SemiBold.ttf */; };
 		1A00000100000000000000C3 /* IBMPlexMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000000B3 /* IBMPlexMono-Bold.ttf */; };
+		1A00000100000000000000D1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000000D0 /* Assets.xcassets */; };
 		1A0000020000000000000001 /* SwipeBreakerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000011 /* SwipeBreakerApp.swift */; };
 		1A0000020000000000000002 /* GameView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000012 /* GameView.swift */; };
 		1A0000020000000000000003 /* GameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000013 /* GameScene.swift */; };
@@ -34,6 +35,7 @@
 		1A00000200000000000000C1 /* IBMPlexMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000000B1 /* IBMPlexMono-Medium.ttf */; };
 		1A00000200000000000000C2 /* IBMPlexMono-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000000B2 /* IBMPlexMono-SemiBold.ttf */; };
 		1A00000200000000000000C3 /* IBMPlexMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000000B3 /* IBMPlexMono-Bold.ttf */; };
+		1A00000200000000000000D1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000000D0 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -64,6 +66,7 @@
 		1A00000100000000000000B1 /* IBMPlexMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Medium.ttf"; sourceTree = "<group>"; };
 		1A00000100000000000000B2 /* IBMPlexMono-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-SemiBold.ttf"; sourceTree = "<group>"; };
 		1A00000100000000000000B3 /* IBMPlexMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Bold.ttf"; sourceTree = "<group>"; };
+		1A00000100000000000000D0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -120,6 +123,7 @@
 		1A00000100000000000000AA /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				1A00000100000000000000D0 /* Assets.xcassets */,
 				1A00000100000000000000AB /* Fonts */,
 			);
 			path = Resources;
@@ -256,6 +260,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A00000100000000000000D1 /* Assets.xcassets in Resources */,
 				1A00000100000000000000C0 /* IBMPlexMono-Regular.ttf in Resources */,
 				1A00000100000000000000C1 /* IBMPlexMono-Medium.ttf in Resources */,
 				1A00000100000000000000C2 /* IBMPlexMono-SemiBold.ttf in Resources */,
@@ -274,6 +279,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A00000200000000000000D1 /* Assets.xcassets in Resources */,
 				1A00000200000000000000C0 /* IBMPlexMono-Regular.ttf in Resources */,
 				1A00000200000000000000C1 /* IBMPlexMono-Medium.ttf in Resources */,
 				1A00000200000000000000C2 /* IBMPlexMono-SemiBold.ttf in Resources */,
@@ -455,6 +461,7 @@
 		1A0000010000000000000072 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -463,6 +470,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = SwipeBreaker;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIAppFonts = (
 					"IBMPlexMono-Regular.ttf",
 					"IBMPlexMono-Medium.ttf",
@@ -489,6 +497,7 @@
 		1A0000010000000000000073 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -497,6 +506,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = SwipeBreaker;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIAppFonts = (
 					"IBMPlexMono-Regular.ttf",
 					"IBMPlexMono-Medium.ttf",
@@ -571,6 +581,7 @@
 		1A0000020000000000000072 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5YW822CHFF;
@@ -597,6 +608,7 @@
 		1A0000020000000000000073 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5YW822CHFF;

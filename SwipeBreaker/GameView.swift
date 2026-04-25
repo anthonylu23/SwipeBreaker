@@ -1,5 +1,8 @@
 import SpriteKit
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @MainActor
 final class GameController: ObservableObject {
@@ -96,7 +99,7 @@ struct GameView: View {
     @StateObject private var settings = AppSettings()
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
-    @State private var isLoaded = false
+    @State private var isLoaded = true
     @State private var isShowingSettings = false
 
     private var resolvedColorScheme: ColorScheme {
@@ -108,84 +111,80 @@ struct GameView: View {
     }
 
     var body: some View {
-        ZStack {
-            palette.background
-                .ignoresSafeArea(.all)
+        GeometryReader { proxy in
+            let viewportSize = resolvedViewportSize(proxy)
+            ZStack(alignment: .topLeading) {
+                palette.background
+                    .ignoresSafeArea(.all)
 
 #if os(macOS)
-            SpriteView(
-                scene: controller.scene,
-                options: [.ignoresSiblingOrder]
-            )
-            .aspectRatio(390.0 / 844.0, contentMode: .fit)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .opacity(isLoaded ? 1 : 0)
+                SpriteView(
+                    scene: controller.scene,
+                    options: [.ignoresSiblingOrder]
+                )
+                .aspectRatio(390.0 / 844.0, contentMode: .fit)
+                .frame(width: viewportSize.width, height: viewportSize.height, alignment: .topLeading)
+                .opacity(isLoaded ? 1 : 0)
 #else
-            SpriteView(
-                scene: controller.scene,
-                options: [.ignoresSiblingOrder]
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea()
-            .opacity(isLoaded ? 1 : 0)
+                FullScreenSpriteView(scene: controller.scene)
+                .frame(width: viewportSize.width, height: viewportSize.height, alignment: .topLeading)
+                .ignoresSafeArea()
+                .opacity(isLoaded ? 1 : 0)
 #endif
 
-            if !isLoaded {
-                LoadingOverlay(palette: palette)
-                    .transition(.opacity)
-            }
-
-            VStack {
-                HStack {
-                    Spacer()
-                    Button {
-                        isShowingSettings = true
-                    } label: {
-                        Image(systemName: "gear")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(palette.textPrimary)
-                            .frame(width: 44, height: 44)
-                    }
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .accessibilityLabel("Settings")
+                if !isLoaded {
+                    LoadingOverlay(palette: palette)
+                        .transition(.opacity)
                 }
-                Spacer()
-            }
-            .padding(.top, 12)
-            .padding(.horizontal, 14)
 
-            if controller.isGameOver {
-                GameOverOverlay(
-                    score: controller.score,
-                    best: controller.best,
-                    turn: controller.turn,
-                    palette: palette,
-                    onRestart: { controller.restart() }
-                )
-                .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                .zIndex(50)
-            }
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button {
+                            isShowingSettings = true
+                        } label: {
+                            Image(systemName: "gear")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(palette.textPrimary)
+                                .frame(width: 44, height: 44)
+                        }
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .accessibilityLabel("Settings")
+                    }
+                    Spacer()
+                }
+                .padding(.top, overlayTopPadding)
+                .padding(.horizontal, 14)
 
-            if isShowingSettings {
-                SettingsOverlay(
-                    settings: settings,
-                    palette: palette,
-                    onClose: { isShowingSettings = false }
-                )
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                .zIndex(100)
+                if controller.isGameOver {
+                    GameOverOverlay(
+                        score: controller.score,
+                        best: controller.best,
+                        turn: controller.turn,
+                        palette: palette,
+                        onRestart: { controller.restart() }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(50)
+                }
+
+                if isShowingSettings {
+                    SettingsOverlay(
+                        settings: settings,
+                        palette: palette,
+                        onClose: { isShowingSettings = false }
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(100)
+                }
             }
+            .frame(width: viewportSize.width, height: viewportSize.height, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
         .preferredColorScheme(settings.preferredColorScheme())
         .onAppear {
             applySettingsToScene()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
-                withAnimation(.easeOut(duration: 0.45)) {
-                    isLoaded = true
-                }
-            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase != .active {
@@ -198,13 +197,63 @@ struct GameView: View {
         .onChange(of: systemColorScheme) { _, _ in
             applySettingsToScene()
         }
-        .animation(.easeOut(duration: 0.22), value: isShowingSettings)
+        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: isShowingSettings)
     }
 
     private func applySettingsToScene() {
         controller.scene.setLightAppearance(resolvedColorScheme == .light)
     }
+
+    private func resolvedViewportSize(_ proxy: GeometryProxy) -> CGSize {
+#if canImport(UIKit)
+        return CGSize(
+            width: proxy.size.width + proxy.safeAreaInsets.leading + proxy.safeAreaInsets.trailing,
+            height: proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom
+        )
+#else
+        return proxy.size
+#endif
+    }
+
+    private var overlayTopPadding: CGFloat {
+#if canImport(UIKit)
+        return 80
+#else
+        return 12
+#endif
+    }
 }
+
+#if canImport(UIKit)
+private final class FittingSKView: SKView {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        scene?.size = bounds.size
+    }
+}
+
+private struct FullScreenSpriteView: UIViewRepresentable {
+    let scene: SKScene
+
+    func makeUIView(context: Context) -> SKView {
+        let view = FittingSKView(frame: .zero)
+        view.backgroundColor = .clear
+        view.ignoresSiblingOrder = true
+        view.contentMode = .scaleToFill
+        scene.scaleMode = .resizeFill
+        view.presentScene(scene)
+        return view
+    }
+
+    func updateUIView(_ view: SKView, context: Context) {
+        if view.scene !== scene {
+            view.presentScene(scene)
+        }
+        view.ignoresSiblingOrder = true
+        scene.size = view.bounds.size
+    }
+}
+#endif
 
 // MARK: - Loading
 
@@ -258,56 +307,80 @@ private struct SettingsOverlay: View {
     let palette: Theme.Palette
     let onClose: () -> Void
 
+    @GestureState private var dragOffset: CGFloat = 0
+    private let dismissThreshold: CGFloat = 80
+
     var body: some View {
-        ZStack {
-            palette.background.opacity(0.4)
+        ZStack(alignment: .bottom) {
+            // Scrim
+            Color.black.opacity(0.32)
                 .ignoresSafeArea()
                 .onTapGesture(perform: onClose)
 
+            // Sheet
             VStack(spacing: 0) {
-                header
-                    .padding(.horizontal, 24)
-                    .padding(.top, 22)
-                    .padding(.bottom, 18)
+                // Drag handle
+                RoundedRectangle(cornerRadius: 2.5)
+                    .fill(palette.textSecondary.opacity(0.35))
+                    .frame(width: 36, height: 5)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+
+                // Header
+                HStack {
+                    Text("Settings")
+                        .font(Theme.Fonts.mono(20, weight: .bold))
+                        .foregroundStyle(palette.textPrimary)
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(palette.textPrimary)
+                            .frame(width: 32, height: 32)
+                    }
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .accessibilityLabel("Close settings")
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 20)
 
                 Divider()
                     .background(palette.border.opacity(0.4))
 
-                VStack(spacing: 20) {
+                VStack(spacing: 24) {
                     appearanceSection
                     audioSection
                 }
                 .padding(.horizontal, 24)
-                .padding(.vertical, 22)
-            }
-            .frame(width: 340)
-            .glassEffect(in: .rect(cornerRadius: Theme.radius))
-            .shadow(color: palette.glow.opacity(0.18), radius: 32, y: 16)
-            .padding(18)
-        }
-    }
+                .padding(.top, 24)
+                .padding(.bottom, 12)
 
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Settings")
-                    .font(Theme.Fonts.mono(20, weight: .bold))
-                    .foregroundStyle(palette.textPrimary)
-                Text("Preferences")
-                    .font(Theme.Fonts.mono(11, weight: .medium))
-                    .tracking(1.5)
-                    .foregroundStyle(palette.textSecondary)
+                // Safe area spacer
+                Color.clear.frame(height: 24)
             }
-            Spacer()
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(palette.textPrimary)
-                    .frame(width: 32, height: 32)
-            }
-            .glassEffect(.regular.interactive(), in: .circle)
-            .accessibilityLabel("Close settings")
+            .frame(maxWidth: .infinity)
+            .glassEffect(
+                in: .rect(
+                    topLeadingRadius: Theme.radius,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: Theme.radius
+                )
+            )
+            .offset(y: max(0, dragOffset))
+            .gesture(
+                DragGesture()
+                    .updating($dragOffset) { value, state, _ in
+                        state = value.translation.height
+                    }
+                    .onEnded { value in
+                        if value.translation.height > dismissThreshold {
+                            onClose()
+                        }
+                    }
+            )
         }
+        .ignoresSafeArea(edges: .bottom)
     }
 
     private var appearanceSection: some View {
@@ -333,43 +406,27 @@ private struct SettingsOverlay: View {
                 .toggleStyle(.switch)
                 .tint(palette.primary)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Volume")
-                        .font(Theme.Fonts.mono(11, weight: .medium))
+                HStack(spacing: 10) {
+                    Image(systemName: "speaker.fill")
+                        .font(.system(size: 11))
                         .foregroundStyle(palette.textSecondary)
-                    HStack(spacing: 10) {
-                        Image(systemName: "speaker.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(palette.textSecondary)
-                        Slider(value: $settings.audioVolume, in: 0...1)
-                            .tint(palette.primary)
-                        Image(systemName: "speaker.wave.3.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(palette.textSecondary)
-                    }
-                }
-                .opacity(settings.audioEnabled ? 1 : 0.45)
-                .disabled(!settings.audioEnabled)
-
-                Button {
-                    AudioManager.shared.preview()
-                } label: {
-                    HStack(spacing: 8) {
+                    Slider(value: $settings.audioVolume, in: 0...1)
+                        .tint(palette.primary)
+                    Image(systemName: "speaker.wave.3.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(palette.textSecondary)
+                    Button {
+                        AudioManager.shared.preview()
+                    } label: {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Test Sound")
-                            .font(Theme.Fonts.mono(13, weight: .semibold))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(palette.primary)
+                            .frame(width: 30, height: 30)
                     }
-                    .foregroundStyle(palette.primary)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 42)
+                    .glassEffect(.regular.interactive(), in: .circle)
                 }
-                .glassEffect(
-                    .regular.tint(palette.primary.opacity(0.18)).interactive(),
-                    in: .rect(cornerRadius: Theme.radiusSm)
-                )
-                .disabled(!settings.audioEnabled)
                 .opacity(settings.audioEnabled ? 1 : 0.45)
+                .disabled(!settings.audioEnabled)
             }
         }
     }

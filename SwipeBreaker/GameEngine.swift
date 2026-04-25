@@ -34,7 +34,7 @@ struct BrickRect: Equatable {
 struct TurnEvents {
     var brickHits: [Vec2] = []
     var brickBreaks: [Vec2] = []
-    var pickups: [Vec2] = []
+    var pickups: [PickupCollectionEvent] = []
     var wallBounces: Int = 0
     var ballsLanded: Int = 0
     var didFinishTurn: Bool = false
@@ -42,6 +42,12 @@ struct TurnEvents {
     var isEmpty: Bool {
         brickHits.isEmpty && brickBreaks.isEmpty && pickups.isEmpty && wallBounces == 0 && ballsLanded == 0
     }
+}
+
+struct PickupCollectionEvent: Equatable {
+    var position: Vec2
+    var kind: PickupKind
+    var mysteryEffect: MysteryPowerEffect?
 }
 
 struct GameEngine {
@@ -107,6 +113,24 @@ struct GameEngine {
         min(1, max(0, distance / 0.22))
     }
 
+    static func effectiveLaunchBallCount(state: GameState) -> Int {
+        effectiveLaunchBallCount(baseCount: state.ballCount, effect: state.queuedMysteryEffect)
+    }
+
+    static func effectiveLaunchBallCount(baseCount: Int, effect: MysteryPowerEffect?) -> Int {
+        let baseCount = max(1, baseCount)
+        switch effect {
+        case .doubleBallsNextLaunch:
+            return baseCount * 2
+        case .halfBallsNextLaunch:
+            return max(1, Int(floor(Double(baseCount) * 0.5)))
+        case .deleteBallsNextLaunch:
+            return max(1, baseCount - min(3, max(0, baseCount - 1)))
+        case .doubleRegularPickupValue, nil:
+            return baseCount
+        }
+    }
+
     static func beginLaunch(state: inout GameState, pull: Vec2, pullDistance: Double) {
         beginLaunch(state: &state, direction: normalizedLaunchVector(fromPull: pull), pullDistance: pullDistance)
     }
@@ -117,11 +141,14 @@ struct GameEngine {
         let direction = direction.normalized()
         guard direction != .zero else { return }
 
+        state.activeMysteryEffect = state.queuedMysteryEffect
+        state.queuedMysteryEffect = nil
+
         let strength = launchStrength(forPullDistance: pullDistance)
         let speed = GameConfig.minLaunchSpeed + (GameConfig.maxLaunchSpeed - GameConfig.minLaunchSpeed) * strength
         let velocity = direction * speed
 
-        state.balls = (0..<state.ballCount).map { index in
+        state.balls = (0..<effectiveLaunchBallCount(baseCount: state.ballCount, effect: state.activeMysteryEffect)).map { index in
             defer { state.nextBallID += 1 }
             return BallState(
                 id: state.nextBallID,
@@ -170,13 +197,14 @@ struct GameEngine {
         state.balls.removeAll(keepingCapacity: true)
         state.ballCount += state.pendingExtraBalls
         state.pendingExtraBalls = 0
+        state.activeMysteryEffect = nil
         state.turn += 1
 
         state.bricks = state.bricks.map {
             Brick(column: $0.column, row: $0.row + 1, hitPoints: $0.hitPoints, maxHitPoints: $0.maxHitPoints)
         }
         state.pickups = state.pickups.map {
-            ExtraBallPickup(column: $0.column, row: $0.row + 1)
+            ExtraBallPickup(column: $0.column, row: $0.row + 1, kind: $0.kind)
         }.filter { $0.row < GameConfig.dangerRow }
 
         if state.bricks.contains(where: { $0.row >= GameConfig.dangerRow }) {
@@ -260,9 +288,21 @@ struct GameEngine {
 
         let pickup = state.pickups[pickupIndex]
         let rect = brickRect(column: pickup.column, row: pickup.row)
-        events.pickups.append(Vec2(x: (rect.minX + rect.maxX) * 0.5, y: (rect.minY + rect.maxY) * 0.5))
+        let position = Vec2(x: (rect.minX + rect.maxX) * 0.5, y: (rect.minY + rect.maxY) * 0.5)
         state.pickups.remove(at: pickupIndex)
-        state.pendingExtraBalls += 1
+
+        var mysteryEffect: MysteryPowerEffect?
+        switch pickup.kind {
+        case .regular:
+            state.pendingExtraBalls += state.activeMysteryEffect == .doubleRegularPickupValue ? 2 : 1
+        case .mystery:
+            var nextRandom = SeededRandom(seed: state.rngSeed)
+            mysteryEffect = randomMysteryEffect(using: &nextRandom)
+            state.rngSeed = nextRandom.seed
+            state.queuedMysteryEffect = mysteryEffect
+        }
+
+        events.pickups.append(PickupCollectionEvent(position: position, kind: pickup.kind, mysteryEffect: mysteryEffect))
     }
 
     private static func handleBrickCollision(position: inout Vec2, previousPosition: Vec2, velocity: inout Vec2, state: inout GameState, events: inout TurnEvents) {
@@ -331,11 +371,31 @@ struct GameEngine {
             state.bricks.append(Brick(column: column, row: 0, hitPoints: hp, maxHitPoints: hp))
         }
 
-        if let pickupColumn = columns.dropFirst(occupiedCount).first {
-            state.pickups.append(ExtraBallPickup(column: pickupColumn, row: 0))
+        var availablePickupColumns = Array(columns.dropFirst(occupiedCount))
+        if let pickupColumn = availablePickupColumns.first {
+            state.pickups.append(ExtraBallPickup(column: pickupColumn, row: 0, kind: .regular))
+            availablePickupColumns.removeFirst()
+        }
+
+        if nextRandom.next() % 5 == 0, let mysteryColumn = availablePickupColumns.first {
+            state.pickups.append(ExtraBallPickup(column: mysteryColumn, row: 0, kind: .mystery))
         }
 
         state.rngSeed = nextRandom.seed
+    }
+
+    private static func randomMysteryEffect(using random: inout SeededRandom) -> MysteryPowerEffect {
+        let roll = Int(random.next() % 100)
+        switch roll {
+        case 0..<30:
+            return .doubleBallsNextLaunch
+        case 30..<60:
+            return .doubleRegularPickupValue
+        case 60..<85:
+            return .halfBallsNextLaunch
+        default:
+            return .deleteBallsNextLaunch
+        }
     }
 }
 

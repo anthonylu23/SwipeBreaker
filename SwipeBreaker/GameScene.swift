@@ -355,7 +355,11 @@ final class GameScene: SKScene {
         launcherNode.fillColor = Palette.launcher
         ballNodes.values.forEach { updateBallNodeTheme($0) }
         unusedBallNodes.forEach { updateBallNodeTheme($0) }
-        updateDangerLine()
+        if brickNodes.isEmpty {
+            updateDangerLine()
+        } else {
+            renderBricks()
+        }
     }
 
     private func layoutStaticNodes() {
@@ -429,7 +433,8 @@ final class GameScene: SKScene {
     private func renderHUD() {
         scoreLabel.text = "\(state.score)"
         let bestScore = highScores.first?.score ?? 0
-        bestLabel.text = "BEST \(bestScore)   TURN \(state.turn)   BALLS \(state.ballCount)"
+        let effectText = state.queuedMysteryEffect.map { "   NEXT \($0.shortLabel)" } ?? ""
+        bestLabel.text = "BEST \(bestScore)   TURN \(state.turn)   BALLS \(state.ballCount)\(effectText)"
         if state.isGameOver {
             statusLabel.text = ""
             statusLabel.alpha = 0
@@ -483,35 +488,66 @@ final class GameScene: SKScene {
 
             let rect = sceneRect(for: brick)
             node.position = CGPoint(x: rect.midX, y: rect.midY)
+            let cornerRadius = max(7, min(rect.width, rect.height) * 0.22)
+            let bodyRect = CGRect(x: -rect.width * 0.5, y: -rect.height * 0.5, width: rect.width, height: rect.height)
             let bodyPath = CGPath(
-                roundedRect: CGRect(x: -rect.width * 0.5, y: -rect.height * 0.5, width: rect.width, height: rect.height),
-                cornerWidth: 5,
-                cornerHeight: 5,
+                roundedRect: bodyRect,
+                cornerWidth: cornerRadius,
+                cornerHeight: cornerRadius,
                 transform: nil
             )
+            let style = brickGlassStyle(for: brick)
             node.path = bodyPath
-            node.fillColor = brickColor(for: brick)
-            node.strokeColor = brickStrokeColor(for: brick)
+            node.fillColor = style.bodyFill
+            node.strokeColor = style.outerRim
+            node.lineWidth = max(1.5, min(rect.width, rect.height) * 0.045)
+            node.glowWidth = usesLightAppearance ? 0.8 : 1.4
 
             if let shadow = node.childNode(withName: "shadow") as? SKShapeNode {
                 shadow.path = bodyPath
+                shadow.fillColor = style.shadow
+                shadow.position = CGPoint(x: rect.width * 0.035, y: -rect.height * 0.07)
             }
-            if let highlight = node.childNode(withName: "highlight") as? SKShapeNode {
-                let inset: CGFloat = 1.6
-                highlight.path = CGPath(
-                    roundedRect: CGRect(
-                        x: -rect.width * 0.5 + inset,
-                        y: -rect.height * 0.5 + inset,
-                        width: rect.width - inset * 2,
-                        height: rect.height - inset * 2
-                    ),
-                    cornerWidth: 4,
-                    cornerHeight: 4,
+            if let innerRim = node.childNode(withName: "innerRim") as? SKShapeNode {
+                let inset = max(2.0, min(rect.width, rect.height) * 0.075)
+                innerRim.path = CGPath(
+                    roundedRect: bodyRect.insetBy(dx: inset, dy: inset),
+                    cornerWidth: max(2, cornerRadius - inset),
+                    cornerHeight: max(2, cornerRadius - inset),
                     transform: nil
                 )
+                innerRim.strokeColor = style.innerRim
+                innerRim.lineWidth = max(0.8, min(rect.width, rect.height) * 0.026)
+            }
+            if let topSheen = node.childNode(withName: "topSheen") as? SKShapeNode {
+                topSheen.path = CGPath(
+                    roundedRect: CGRect(
+                        x: -rect.width * 0.34,
+                        y: rect.height * 0.16,
+                        width: rect.width * 0.50,
+                        height: rect.height * 0.17
+                    ),
+                    cornerWidth: rect.height * 0.085,
+                    cornerHeight: rect.height * 0.085,
+                    transform: nil
+                )
+                topSheen.fillColor = style.topSheen
+            }
+            if let gloss = node.childNode(withName: "gloss") as? SKShapeNode {
+                gloss.path = CGPath(
+                    ellipseIn: CGRect(
+                        x: rect.width * 0.18,
+                        y: rect.height * 0.22,
+                        width: rect.width * 0.22,
+                        height: rect.height * 0.12
+                    ),
+                    transform: nil
+                )
+                gloss.fillColor = style.gloss
             }
             let label = node.childNode(withName: "hp") as? SKLabelNode
             label?.text = "\(brick.hitPoints)"
+            label?.fontColor = style.label
             label?.fontSize = max(11, min(20, rect.height * 0.42))
 
             if animateChanges, let previousHitPoints, previousHitPoints > brick.hitPoints {
@@ -590,9 +626,13 @@ final class GameScene: SKScene {
             let radius = min(rect.width, rect.height) * 0.21
             node.path = CGPath(ellipseIn: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2), transform: nil)
             node.position = CGPoint(x: rect.midX, y: rect.midY)
+            updatePickupNode(node, for: pickup.kind)
             if let core = node.childNode(withName: "core") as? SKShapeNode {
                 let coreRadius = radius * 0.45
                 core.path = CGPath(ellipseIn: CGRect(x: -coreRadius, y: -coreRadius, width: coreRadius * 2, height: coreRadius * 2), transform: nil)
+            }
+            if let label = node.childNode(withName: "label") as? SKLabelNode {
+                label.fontSize = radius * 1.35
             }
 
             if isNew {
@@ -864,7 +904,7 @@ final class GameScene: SKScene {
 
         for hit in events.brickHits {
             spawnImpactSpark(at: scenePoint(for: hit), color: SKColor(white: 1, alpha: 0.8), radius: 4)
-            requestShake(intensity: 1.6, duration: 0.10)
+            requestShake(intensity: 0.7, duration: 0.07)
             AudioManager.shared.play(.brickHit)
         }
 
@@ -874,7 +914,7 @@ final class GameScene: SKScene {
             combosThisFrame += 1
             spawnImpactSpark(at: scenePoint(for: breakPoint), color: Palette.accent, radius: 8)
             spawnComboLabelIfNeeded(at: scenePoint(for: breakPoint))
-            requestShake(intensity: 3.2, duration: 0.16)
+            requestShake(intensity: 1.4, duration: 0.10)
             AudioManager.shared.play(.brickBreak)
         }
 
@@ -883,13 +923,17 @@ final class GameScene: SKScene {
         }
 
         for pickup in events.pickups {
-            spawnImpactSpark(at: scenePoint(for: pickup), color: Palette.pickup, radius: 10)
+            let color = pickup.kind == .mystery ? Palette.accent : Palette.pickup
+            spawnImpactSpark(at: scenePoint(for: pickup.position), color: color, radius: pickup.kind == .mystery ? 12 : 10)
+            if let effect = pickup.mysteryEffect {
+                spawnMysteryEffectLabel(effect, at: scenePoint(for: pickup.position))
+            }
             AudioManager.shared.play(.pickup)
         }
     }
 
     private func requestShake(intensity: CGFloat, duration: TimeInterval) {
-        shakeIntensity = min(6.5, shakeIntensity + intensity)
+        shakeIntensity = min(3.0, shakeIntensity + intensity)
         shakeDecay = max(shakeDecay, CGFloat(1.0 / duration))
     }
 
@@ -940,6 +984,26 @@ final class GameScene: SKScene {
             comboFeedbackGenerator.success()
             comboFeedbackGenerator.prepare()
         }
+    }
+
+    private func spawnMysteryEffectLabel(_ effect: MysteryPowerEffect, at point: CGPoint) {
+        let label = SKLabelNode(fontNamed: Theme.FontName.bold)
+        label.text = effect.shortLabel
+        label.fontSize = 15
+        label.fontColor = Palette.accent
+        label.horizontalAlignmentMode = .center
+        label.verticalAlignmentMode = .center
+        label.position = point
+        label.zPosition = 90
+        effectsLayer.addChild(label)
+
+        let move = SKAction.group([
+            .moveBy(x: 0, y: 28, duration: 0.45),
+            .fadeOut(withDuration: 0.45),
+            .scale(to: 1.25, duration: 0.45)
+        ])
+        move.timingMode = .easeOut
+        label.run(.sequence([move, .removeFromParent()]))
     }
 
     private func spawnImpactSpark(at point: CGPoint, color: SKColor, radius: CGFloat) {
@@ -1099,23 +1163,30 @@ final class GameScene: SKScene {
 
         let shadow = SKShapeNode()
         shadow.name = "shadow"
-        shadow.fillColor = SKColor(white: 0, alpha: 0.45)
         shadow.strokeColor = .clear
-        shadow.position = CGPoint(x: 1.5, y: -2.5)
         shadow.zPosition = -1
         node.addChild(shadow)
 
-        let highlight = SKShapeNode()
-        highlight.name = "highlight"
-        highlight.fillColor = .clear
-        highlight.strokeColor = SKColor(white: 1, alpha: 0.18)
-        highlight.lineWidth = 1
-        highlight.zPosition = 0.5
-        node.addChild(highlight)
+        let innerRim = SKShapeNode()
+        innerRim.name = "innerRim"
+        innerRim.fillColor = .clear
+        innerRim.zPosition = 0.35
+        node.addChild(innerRim)
+
+        let topSheen = SKShapeNode()
+        topSheen.name = "topSheen"
+        topSheen.strokeColor = .clear
+        topSheen.zPosition = 0.45
+        node.addChild(topSheen)
+
+        let gloss = SKShapeNode()
+        gloss.name = "gloss"
+        gloss.strokeColor = .clear
+        gloss.zPosition = 0.55
+        node.addChild(gloss)
 
         let label = SKLabelNode(fontNamed: Theme.FontName.bold)
         label.name = "hp"
-        label.fontColor = .white
         label.horizontalAlignmentMode = .center
         label.verticalAlignmentMode = .center
         label.zPosition = 1
@@ -1169,9 +1240,77 @@ final class GameScene: SKScene {
         node.run(punch, withKey: "damage")
     }
 
-    private func brickColor(for brick: Brick) -> SKColor {
-        // Low health = healthy accent, high health = destructive red.
-        // Pass through pickup gold at mid-range so the gradient stays vivid.
+    private struct BrickGlassStyle {
+        let bodyFill: SKColor
+        let outerRim: SKColor
+        let innerRim: SKColor
+        let shadow: SKColor
+        let topSheen: SKColor
+        let gloss: SKColor
+        let label: SKColor
+    }
+
+    private func brickGlassStyle(for brick: Brick) -> BrickGlassStyle {
+        let healthTint = mutedBrickTint(for: brick)
+
+        if usesLightAppearance {
+            let body = SKColor(hex: 0xF3EEE3, alpha: 0.50)
+                .blended(to: healthTint, fraction: 0.46)
+                .withAlphaComponent(0.56)
+            let outer = SKColor(white: 1, alpha: 0.82)
+                .blended(to: healthTint, fraction: 0.42)
+                .withAlphaComponent(0.88)
+            let inner = SKColor(hex: 0xFFFFFF, alpha: 0.38)
+                .blended(to: healthTint, fraction: 0.20)
+                .withAlphaComponent(0.42)
+            let label = SKColor(hex: 0x2F2823, alpha: 0.92)
+                .blended(to: healthTint, fraction: 0.26)
+                .withAlphaComponent(0.95)
+
+            return BrickGlassStyle(
+                bodyFill: body,
+                outerRim: outer,
+                innerRim: inner,
+                shadow: healthTint.withAlphaComponent(0.20),
+                topSheen: SKColor(white: 1, alpha: 0.30),
+                gloss: SKColor(white: 1, alpha: 0.48),
+                label: label
+            )
+        }
+
+        let body = SKColor(hex: 0x3D4646, alpha: 0.30)
+            .blended(to: healthTint, fraction: 0.52)
+            .withAlphaComponent(0.34)
+        let outer = SKColor(hex: 0xDCE8E5, alpha: 0.58)
+            .blended(to: healthTint, fraction: 0.52)
+            .withAlphaComponent(0.68)
+        let inner = SKColor(hex: 0xFFFFFF, alpha: 0.20)
+            .blended(to: healthTint, fraction: 0.24)
+            .withAlphaComponent(0.24)
+        let label = Palette.textPrimary
+            .blended(to: healthTint, fraction: 0.22)
+            .withAlphaComponent(0.96)
+
+        return BrickGlassStyle(
+            bodyFill: body,
+            outerRim: outer,
+            innerRim: inner,
+            shadow: SKColor(white: 0, alpha: 0.36),
+            topSheen: SKColor(white: 1, alpha: 0.16),
+            gloss: SKColor(white: 1, alpha: 0.28),
+            label: label
+        )
+    }
+
+    private func mutedBrickTint(for brick: Brick) -> SKColor {
+        let base = brickHealthTint(for: brick)
+        let neutral = usesLightAppearance
+            ? SKColor(hex: 0xD5C8B8)
+            : SKColor(hex: 0x8BA09C)
+        return neutral.blended(to: base, fraction: usesLightAppearance ? 0.44 : 0.52)
+    }
+
+    private func brickHealthTint(for brick: Brick) -> SKColor {
         let healthScale = max(4, state.turn + 5)
         let t = CGFloat(min(1, Double(brick.hitPoints) / Double(healthScale)))
         let healthy = Palette.accent
@@ -1182,12 +1321,6 @@ final class GameScene: SKScene {
         } else {
             return mid.blended(to: wounded, fraction: (t - 0.5) * 2)
         }
-    }
-
-    private func brickStrokeColor(for brick: Brick) -> SKColor {
-        let healthScale = max(4, state.turn + 5)
-        let t = CGFloat(min(1, Double(brick.hitPoints) / Double(healthScale)))
-        return Palette.textPrimary.withAlphaComponent(0.20 + 0.15 * (1 - t))
     }
 
     private func dequeueBallNode() -> SKShapeNode {
@@ -1245,7 +1378,29 @@ final class GameScene: SKScene {
         core.fillColor = Palette.pickup.withAlphaComponent(0.85)
         core.strokeColor = .clear
         node.addChild(core)
+
+        let label = SKLabelNode(fontNamed: Theme.FontName.bold)
+        label.name = "label"
+        label.text = "?"
+        label.horizontalAlignmentMode = .center
+        label.verticalAlignmentMode = .center
+        label.fontColor = .white
+        label.zPosition = 1
+        node.addChild(label)
         return node
+    }
+
+    private func updatePickupNode(_ node: SKShapeNode, for kind: PickupKind) {
+        switch kind {
+        case .regular:
+            node.strokeColor = Palette.pickup
+            (node.childNode(withName: "core") as? SKShapeNode)?.fillColor = Palette.pickup.withAlphaComponent(0.85)
+            node.childNode(withName: "label")?.isHidden = true
+        case .mystery:
+            node.strokeColor = Palette.accent
+            (node.childNode(withName: "core") as? SKShapeNode)?.fillColor = Palette.accent.withAlphaComponent(0.88)
+            node.childNode(withName: "label")?.isHidden = false
+        }
     }
 
     private func recyclePickupNode(id: String, node: SKShapeNode) {
